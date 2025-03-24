@@ -1,3 +1,5 @@
 build/
 *.pnm
 *.ps
+.cache
+compile_commands.json
