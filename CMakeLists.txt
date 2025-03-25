@@ -23,6 +23,17 @@ fetchcontent_declare(
 )
 fetchcontent_makeavailable(Sleipnir)
 
+# set(WITH_PROTOBUF OFF)
+#
+# # TODO allow system
+# fetchcontent_declare(
+#   wpilib
+#   GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
+#   # master on 15/3/25
+#   GIT_TAG 1efaaefd78a634599b522fc2420c7283722554fb
+# )
+# fetchcontent_makeavailable(wpilib)
+
 set(USE_SYSTEM_EIGEN ON)
 set(BUILD_TESTING ON)
 
@@ -36,7 +47,6 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 # TODO fetchcontent and patch warnings
 find_package(apriltag REQUIRED)
 include_directories(${apriltag_INCLUDE_DIRS})
-
 
 include_directories(include
   ${apriltag_INCLUDE_DIRS}

@@ -1,6 +1,6 @@
-#include "apriltag.h"
-#include "sleipnir/autodiff/variable.hpp"
-#include "sleipnir/autodiff/variable_matrix.hpp"
+#include <apriltag.h>
+#include <sleipnir/autodiff/variable.hpp>
+#include <sleipnir/autodiff/variable_matrix.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/hal/interface.h>
 #include <opencv2/core/mat.hpp>
@@ -37,7 +37,6 @@ int main(void) {
     cv::Point3d{tagSize, -tagSize, 0},
     cv::Point3d{-tagSize, -tagSize, 0},
   };
-
 
   cv::Mat currentFrame;
 
@@ -117,8 +116,8 @@ int main(void) {
       cv::Size textsize =
           cv::getTextSize(text, fontface, fontscale, 2, &baseline);
       putText(currentFrame, text,
-              cv::Point(det->c[0] - textsize.width / 2,
-                        det->c[1] + textsize.height / 2),
+              cv::Point(det->c[0] - textsize.width / 2.0,
+                        det->c[1] + textsize.height / 2.0),
               fontface, fontscale, cv::Scalar(0xff, 0x99, 0), 2);
     }
 
@@ -129,6 +128,8 @@ int main(void) {
       cv::Mat calibration{3, 3, CV_64F};
       cv::eigen2cv(A, calibration);
       cv::solvePnP(tagPoints, points, calibration, distCoeffs, rvec, tvec);
+      std::cout << "Rotation = " << std::endl << " " << rvec << std::endl;
+      std::cout << "Translation = " << std::endl << " " << tvec << std::endl;
     }
 
     apriltag_detections_destroy(detections);
