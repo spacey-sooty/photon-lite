@@ -1,27 +1,51 @@
 // Copyright (C) Jade T 2025
 
+#define OPENCV_DISABLE_EIGEN_TENSOR_SUPPORT
+#define IMGUI_DEFINE_MATH_OPERATORS
+
 #include <apriltag.h>
+#include <cscore.h>
+#include <cscore_cv.h>
+#include <imgui.h>
+#include <imgui_internal.h>
 #include <tag36h11.h>
 
 #include <atomic>
+#include <iostream>
 #include <thread>
 #include <vector>
 
-#define IMGUI_DEFINE_MATH_OPERATORS
-#include <imgui.h>
-#include <imgui_internal.h>
+#include <Eigen/Core>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
+#include <opencv2/core/eigen.hpp>
 #include <opencv2/imgproc.hpp>
 #include <wpi/print.h>
 #include <wpi/spinlock.h>
 #include <wpigui.h>
 
-#include <cscore.h>
-#include <cscore_cv.h>
-
 namespace gui = wpi::gui;
 
 int main() {
+  // camera calibration TODO
+  constexpr double fx = 600;
+  constexpr double fy = 600;
+  constexpr double cx = 300;
+  constexpr double cy = 150;
+  Eigen::Matrix<double, 3, 3> A{
+      {fx, 0, cx},
+      {0, fy, cy},
+      {0, 0, 1},
+  };
+
+  float tagSize = 0.08255;
+  std::vector<cv::Point3d> tagPoints{
+      cv::Point3d{-tagSize, tagSize, 0},
+      cv::Point3d{tagSize, tagSize, 0},
+      cv::Point3d{tagSize, -tagSize, 0},
+      cv::Point3d{-tagSize, -tagSize, 0},
+  };
+
   std::atomic<cv::Mat *> latestFrame{nullptr};
   std::vector<cv::Mat *> sharedFreeList;
   wpi::spinlock sharedFreeListMutex;
@@ -98,9 +122,15 @@ int main() {
       image_u8_t im = {gray.cols, gray.rows, gray.cols, gray.data};
       zarray_t *detections = apriltag_detector_detect(detector, &im);
 
+      std::vector<cv::Point2d> points{};
+
       for (int i = 0; i < zarray_size(detections); i++) {
         apriltag_detection_t *det;
         zarray_get(detections, i, &det);
+        points.emplace_back(cv::Point2d{det->p[0][0], det->p[0][1]});
+        points.emplace_back(cv::Point2d{det->p[1][0], det->p[1][1]});
+        points.emplace_back(cv::Point2d{det->p[3][0], det->p[3][1]});
+        points.emplace_back(cv::Point2d{det->p[2][0], det->p[2][1]});
         cv::line(*frame, cv::Point(det->p[0][0], det->p[0][1]),
                  cv::Point(det->p[1][0], det->p[1][1]), cv::Scalar(0, 0xff, 0),
                  2);
@@ -127,6 +157,25 @@ int main() {
                               det->c[1] + textsize.height / 2.0),
                     fontface, fontscale, cv::Scalar(0xff, 0x99, 0), 2);
       }
+
+      if (points.size() >= 4) {
+        cv::Mat rvec{3, 3, CV_64F};
+        cv::Mat tvec{3, 3, CV_64F};
+        std::vector<double> distCoeffs{
+            0.02860487071331241,   0.009126602251891335, 0.0019540088117773633,
+            -0.003596010527440653, -0.13863285564042926, -0.0016559347518291224,
+            -4.017061418060786,    0.005592461908791266};
+        cv::Mat calibration{3, 3, CV_64F};
+        cv::eigen2cv(A, calibration);
+        cv::solvePnP(tagPoints, points, calibration, distCoeffs, rvec, tvec);
+        std::cout << "Rotation = " << std::endl << " " << rvec << std::endl;
+        std::cout << "Translation = " << std::endl << " " << tvec << std::endl;
+
+        rvec.release();
+        tvec.release();
+      }
+
+      apriltag_detections_destroy(detections);
 
       // create or update texture
       if (!tex || frame->cols != tex.GetWidth() ||
@@ -155,7 +204,12 @@ int main() {
     }
     ImGui::End();
   });
+
   gui::Main();
+
+  apriltag_detector_destroy(detector);
+  tag36h11_destroy(family);
+
   stopCamera = true;
   thr.join();
 }
