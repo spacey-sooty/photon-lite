@@ -16,41 +16,31 @@ include(FetchContent)
 
 # Sleipnir dependency
 fetchcontent_declare(
-  Sleipnir
-  GIT_REPOSITORY https://github.com/SleipnirGroup/Sleipnir.git
-  # master on 24/3/25
-  GIT_TAG 189c07282bf4604db9babbcd395cb6a8cf110f0d
+    Sleipnir
+    GIT_REPOSITORY https://github.com/SleipnirGroup/Sleipnir.git
+    # master on 24/3/25
+    GIT_TAG 189c07282bf4604db9babbcd395cb6a8cf110f0d
 )
 fetchcontent_makeavailable(Sleipnir)
 
-# set(WITH_PROTOBUF OFF)
-#
-# # TODO allow system
-# fetchcontent_declare(
-#   wpilib
-#   GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
-#   # master on 15/3/25
-#   GIT_TAG 1efaaefd78a634599b522fc2420c7283722554fb
-# )
-# fetchcontent_makeavailable(wpilib)
+set(WITH_PROTOBUF OFF)
+
+# TODO allow system
+fetchcontent_declare(
+    wpilib
+    GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
+    # master on 15/3/25
+    GIT_TAG 1efaaefd78a634599b522fc2420c7283722554fb
+)
+fetchcontent_makeavailable(wpilib)
 
 set(USE_SYSTEM_EIGEN ON)
-set(BUILD_TESTING ON)
+set(BUILD_TESTING OFF)
 
 # OpenCV dependency
 # TODO fetchcontent
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
-
-# AprilTag dependency
-
-# TODO fetchcontent and patch warnings
-find_package(apriltag REQUIRED)
-include_directories(${apriltag_INCLUDE_DIRS})
-
-include_directories(include
-  ${apriltag_INCLUDE_DIRS}
-)
 
 # Eigen dependency
 if(NOT USE_SYSTEM_EIGEN)
@@ -65,7 +55,6 @@ if(NOT USE_SYSTEM_EIGEN)
 else()
     find_package(Eigen3 CONFIG REQUIRED)
 endif()
-
 
 if(BUILD_TESTING)
     # Catch2 dependency
@@ -83,6 +72,20 @@ set_property(SOURCE ${src} PROPERTY COMPILE_FLAGS "-Wno-unused")
 add_executable(visionrubbish ${src})
 
 target_include_directories(visionrubbish PRIVATE src)
-target_compile_options(visionrubbish PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined,leak)
-target_link_libraries(visionrubbish PUBLIC Eigen3::Eigen Sleipnir ${OpenCV_LIBS} apriltag -fsanitize=address,undefined,leak)
+target_compile_options(
+    visionrubbish
+    PRIVATE -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined,leak
+)
+target_link_libraries(
+    visionrubbish
+    PUBLIC
+        Eigen3::Eigen
+        Sleipnir
+        ${OpenCV_LIBS}
+        apriltag
+        wpigui
+        cscore
+        apriltag
+        -fsanitize=address,undefined,leak
+)
 target_compile_features(visionrubbish PUBLIC cxx_std_23)

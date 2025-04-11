@@ -1,0 +1,18 @@
+cppHeaderFileInclude {
+  \.h$
+  \.hpp$
+}
+
+cppSrcFileInclude {
+  \.cpp$
+}
+
+modifiableFileExclude {}
+
+includeOtherLibs {
+  ^Eigen/
+  ^opencv2/
+  ^sleipnir
+  ^wpi
+  ^frc
+}
