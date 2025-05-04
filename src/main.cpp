@@ -1,8 +1,10 @@
 // Copyright (C) Jade T 2025
 
+#include <networktables/NetworkTableInstance.h>
+#include <networktables/StructTopic.h>
+
 #include <atomic>
 #include <cassert>
-#include <format>
 #include <iostream>
 #include <memory>
 #include <ostream>
@@ -17,14 +19,17 @@
 #include <cscore_cv.h>
 #include <frc/apriltag/AprilTagDetection.h>
 #include <frc/apriltag/AprilTagDetector.h>
+#include <frc/geometry/Pose3d.h>
+#include <frc/geometry/Rotation3d.h>
+#include <frc/geometry/Transform3d.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
+#include <opencv2/core/eigen.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/core/eigen.hpp>
 #include <tag36h11.h>
 #include <wpi/mutex.h>
 #include <wpi/print.h>
@@ -32,23 +37,22 @@
 #include <wpigui.h>
 
 #include "calibration.h"
+#include "opencv_help.h"
 
 namespace gui = wpi::gui;
 
 int main() {
+  nt::NetworkTableInstance instance = nt::NetworkTableInstance::GetDefault();
+  instance.StartServer();
+  instance.StartLocal();
+  nt::StructPublisher<frc::Transform3d> cameraToTargetTransform =
+      instance.GetStructTopic<frc::Transform3d>("cameraToTarget").Publish();
+
   Calibration calib = {.fx = 1397.88,
                        .fy = 1408.37,
                        .cx = 472.34,
                        .cy = 171.44,
                        .distortion = {0.753, -2.856, -0.012, 0.049, 7.766}};
-
-  float tagSize = 0.08255;
-  std::vector<cv::Point3d> tagPoints{
-      cv::Point3d{-tagSize, tagSize, 0},
-      cv::Point3d{tagSize, tagSize, 0},
-      cv::Point3d{tagSize, -tagSize, 0},
-      cv::Point3d{-tagSize, -tagSize, 0},
-  };
 
   wpi::spinlock latestFrameMutex;
   std::unique_ptr<cv::Mat> latestFrame;
@@ -124,10 +128,14 @@ int main() {
 
       for (size_t i = 0; i < detections.size(); i++) {
         const frc::AprilTagDetection *det = detections[i];
-        points.emplace_back(cv::Point2d{det->GetCorner(0).x, det->GetCorner(0).y});
-        points.emplace_back(cv::Point2d{det->GetCorner(1).x, det->GetCorner(1).y});
-        points.emplace_back(cv::Point2d{det->GetCorner(2).x, det->GetCorner(2).y});
-        points.emplace_back(cv::Point2d{det->GetCorner(3).x, det->GetCorner(3).y});
+        points.emplace_back(
+            cv::Point2d{det->GetCorner(0).x, det->GetCorner(0).y});
+        points.emplace_back(
+            cv::Point2d{det->GetCorner(1).x, det->GetCorner(1).y});
+        points.emplace_back(
+            cv::Point2d{det->GetCorner(2).x, det->GetCorner(2).y});
+        points.emplace_back(
+            cv::Point2d{det->GetCorner(3).x, det->GetCorner(3).y});
         cv::line(*frame, cv::Point(points[0].x, points[0].y),
                  cv::Point(points[1].x, points[1].y), cv::Scalar(0, 0xff, 0),
                  2);
@@ -156,19 +164,7 @@ int main() {
       }
 
       if (points.size() >= 4) {
-        std::vector<double> rvec;
-        std::vector<double> tvec;
-        cv::Mat calibration{3, 3, CV_64F};
-        cv::eigen2cv(calib.ToMatrix(), calibration);
-        cv::solvePnP(tagPoints, points, calibration, calib.distortion, rvec, tvec);
-
-        for (double i : rvec) {
-          std::println("Rotation {}", i);
-        }
-
-        for (double i : tvec) {
-          std::println("Translation {}", i);
-        }
+        cameraToTargetTransform.Set(solvePnP_tag36h11(calib, points));
       }
 
       // create or update texture
@@ -203,4 +199,6 @@ int main() {
 
   stopCamera = true;
   thr.join();
+
+  instance.StopServer();
 }

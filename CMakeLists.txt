@@ -84,6 +84,8 @@ target_link_libraries(
         apriltag
         wpigui
         cscore
+        ntcore
+        wpimath
         apriltag
         -fsanitize=address,undefined,leak
 )
