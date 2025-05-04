@@ -10,9 +10,13 @@ cppSrcFileInclude {
 modifiableFileExclude {}
 
 includeOtherLibs {
+  ^apriltag
+  ^cscore
   ^Eigen/
+  ^imgui
   ^opencv2/
   ^sleipnir
+  ^tag
   ^wpi
   ^frc
 }

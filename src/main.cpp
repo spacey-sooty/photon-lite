@@ -1,27 +1,28 @@
-// Copyright (c) FIRST and other WPILib contributors.
-// Open Source Software; you can modify and/or share it under the terms of
-// the WPILib BSD license file in the root directory of this project.
+// Copyright (C) Jade T 2025
 
-#include <apriltag.h>
 #include <atomic>
+#include <cassert>
 #include <memory>
-#include <tag36h11.h>
+#include <opencv2/core/types.hpp>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include <apriltag.h>
+#include <cscore.h>
+#include <cscore_cv.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <frc/apriltag/AprilTagDetection.h>
+#include <frc/apriltag/AprilTagDetector.h>
 #include <opencv2/core/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc.hpp>
+#include <tag36h11.h>
 #include <wpi/mutex.h>
 #include <wpi/print.h>
 #include <wpi/spinlock.h>
 #include <wpigui.h>
-
-#include "cscore.h"
-#include "cscore_cv.h"
 
 namespace gui = wpi::gui;
 
@@ -37,14 +38,8 @@ int main() {
   cs::CvSink cvsink{"cvsink"};
   cvsink.SetSource(camera);
 
-  apriltag_detector_t *detector = apriltag_detector_create();
-  apriltag_family_t *family = tag36h11_create();
-  apriltag_detector_add_family(detector, family);
-
-  detector->quad_decimate = 1;
-  detector->nthreads = 2;
-  detector->debug = false;
-  detector->refine_edges = true;
+  frc::AprilTagDetector detector;
+  detector.AddFamily("tag36h11", 3);
 
   std::thread thr([&] {
     cv::Mat frame;
@@ -98,33 +93,32 @@ int main() {
     if (frame) {
       cv::cvtColor(*frame, gray, cv::COLOR_BGR2GRAY);
 
-      image_u8_t im = {gray.cols, gray.rows, gray.cols, gray.data};
-      zarray_t *detections = apriltag_detector_detect(detector, &im);
+      cv::Size size = gray.size();
+      frc::AprilTagDetector::Results detections = detector.Detect(size.height, size.width, gray.data);
 
-      std::vector<cv::Point2d> points{};
+      std::vector<frc::AprilTagDetection::Point> points{};
 
-      for (int i = 0; i < zarray_size(detections); i++) {
-        apriltag_detection_t *det;
-        zarray_get(detections, i, &det);
-        points.emplace_back(cv::Point2d{det->p[0][0], det->p[0][1]});
-        points.emplace_back(cv::Point2d{det->p[1][0], det->p[1][1]});
-        points.emplace_back(cv::Point2d{det->p[3][0], det->p[3][1]});
-        points.emplace_back(cv::Point2d{det->p[2][0], det->p[2][1]});
-        cv::line(*frame, cv::Point(det->p[0][0], det->p[0][1]),
-                 cv::Point(det->p[1][0], det->p[1][1]), cv::Scalar(0, 0xff, 0),
+      for (size_t i = 0; i < detections.size(); i++) {
+        const frc::AprilTagDetection* det = detections[i];
+        points.emplace_back(det->GetCorner(0));
+        points.emplace_back(det->GetCorner(1));
+        points.emplace_back(det->GetCorner(2));
+        points.emplace_back(det->GetCorner(3));
+        cv::line(*frame, cv::Point(points[0].x, points[0].y),
+                 cv::Point(points[1].x, points[1].y), cv::Scalar(0, 0xff, 0),
                  2);
-        cv::line(*frame, cv::Point(det->p[0][0], det->p[0][1]),
-                 cv::Point(det->p[3][0], det->p[3][1]), cv::Scalar(0, 0, 0xff),
+        cv::line(*frame, cv::Point(points[0].x, points[0].y),
+                 cv::Point(points[3].x, points[3].y), cv::Scalar(0, 0, 0xff),
                  2);
-        cv::line(*frame, cv::Point(det->p[1][0], det->p[1][1]),
-                 cv::Point(det->p[2][0], det->p[2][1]), cv::Scalar(0xff, 0, 0),
+        cv::line(*frame, cv::Point(points[1].x, points[1].y),
+                 cv::Point(points[2].x, points[2].y), cv::Scalar(0xff, 0, 0),
                  2);
-        cv::line(*frame, cv::Point(det->p[2][0], det->p[2][1]),
-                 cv::Point(det->p[3][0], det->p[3][1]), cv::Scalar(0xff, 0, 0),
+        cv::line(*frame, cv::Point(points[2].x, points[2].y),
+                 cv::Point(points[3].x, points[3].y), cv::Scalar(0xff, 0, 0),
                  2);
 
         std::stringstream ss;
-        ss << det->id;
+        ss << det->GetId();
         cv::String text = ss.str();
         int fontface = cv::FONT_HERSHEY_SCRIPT_SIMPLEX;
         double fontscale = 1.0;
@@ -132,12 +126,10 @@ int main() {
         cv::Size textsize =
             cv::getTextSize(text, fontface, fontscale, 2, &baseline);
         cv::putText(*frame, text,
-                    cv::Point(det->c[0] - textsize.width / 2.0,
-                              det->c[1] + textsize.height / 2.0),
+                    cv::Point(det->GetCenter().x - textsize.width / 2.0,
+                              det->GetCenter().y + textsize.height / 2.0),
                     fontface, fontscale, cv::Scalar(0xff, 0x99, 0), 2);
       }
-
-      apriltag_detections_destroy(detections);
 
       // create or update texture
       if (!tex || frame->cols != tex.GetWidth() ||
@@ -168,10 +160,6 @@ int main() {
     ImGui::End();
   });
   gui::Main();
-
-
-  apriltag_detector_destroy(detector);
-  tag36h11_destroy(family);
 
   stopCamera = true;
   thr.join();
