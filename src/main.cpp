@@ -2,8 +2,12 @@
 
 #include <atomic>
 #include <cassert>
+#include <format>
+#include <iostream>
 #include <memory>
-#include <opencv2/core/types.hpp>
+#include <ostream>
+#include <print>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -11,22 +15,41 @@
 #include <apriltag.h>
 #include <cscore.h>
 #include <cscore_cv.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include <frc/apriltag/AprilTagDetection.h>
 #include <frc/apriltag/AprilTagDetector.h>
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/core/eigen.hpp>
 #include <tag36h11.h>
 #include <wpi/mutex.h>
 #include <wpi/print.h>
 #include <wpi/spinlock.h>
 #include <wpigui.h>
 
+#include "calibration.h"
+
 namespace gui = wpi::gui;
 
 int main() {
+  Calibration calib = {.fx = 1397.88,
+                       .fy = 1408.37,
+                       .cx = 472.34,
+                       .cy = 171.44,
+                       .distortion = {0.753, -2.856, -0.012, 0.049, 7.766}};
+
+  float tagSize = 0.08255;
+  std::vector<cv::Point3d> tagPoints{
+      cv::Point3d{-tagSize, tagSize, 0},
+      cv::Point3d{tagSize, tagSize, 0},
+      cv::Point3d{tagSize, -tagSize, 0},
+      cv::Point3d{-tagSize, -tagSize, 0},
+  };
+
   wpi::spinlock latestFrameMutex;
   std::unique_ptr<cv::Mat> latestFrame;
   wpi::mutex freeListMutex;
@@ -94,16 +117,17 @@ int main() {
       cv::cvtColor(*frame, gray, cv::COLOR_BGR2GRAY);
 
       cv::Size size = gray.size();
-      frc::AprilTagDetector::Results detections = detector.Detect(size.height, size.width, gray.data);
+      frc::AprilTagDetector::Results detections =
+          detector.Detect(size.height, size.width, gray.data);
 
-      std::vector<frc::AprilTagDetection::Point> points{};
+      std::vector<cv::Point2d> points{};
 
       for (size_t i = 0; i < detections.size(); i++) {
-        const frc::AprilTagDetection* det = detections[i];
-        points.emplace_back(det->GetCorner(0));
-        points.emplace_back(det->GetCorner(1));
-        points.emplace_back(det->GetCorner(2));
-        points.emplace_back(det->GetCorner(3));
+        const frc::AprilTagDetection *det = detections[i];
+        points.emplace_back(cv::Point2d{det->GetCorner(0).x, det->GetCorner(0).y});
+        points.emplace_back(cv::Point2d{det->GetCorner(1).x, det->GetCorner(1).y});
+        points.emplace_back(cv::Point2d{det->GetCorner(2).x, det->GetCorner(2).y});
+        points.emplace_back(cv::Point2d{det->GetCorner(3).x, det->GetCorner(3).y});
         cv::line(*frame, cv::Point(points[0].x, points[0].y),
                  cv::Point(points[1].x, points[1].y), cv::Scalar(0, 0xff, 0),
                  2);
@@ -129,6 +153,22 @@ int main() {
                     cv::Point(det->GetCenter().x - textsize.width / 2.0,
                               det->GetCenter().y + textsize.height / 2.0),
                     fontface, fontscale, cv::Scalar(0xff, 0x99, 0), 2);
+      }
+
+      if (points.size() >= 4) {
+        std::vector<double> rvec;
+        std::vector<double> tvec;
+        cv::Mat calibration{3, 3, CV_64F};
+        cv::eigen2cv(calib.ToMatrix(), calibration);
+        cv::solvePnP(tagPoints, points, calibration, calib.distortion, rvec, tvec);
+
+        for (double i : rvec) {
+          std::println("Rotation {}", i);
+        }
+
+        for (double i : tvec) {
+          std::println("Translation {}", i);
+        }
       }
 
       // create or update texture
