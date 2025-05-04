@@ -1,65 +1,39 @@
-// Copyright (C) Jade T 2025
-
-#include <format>
-#include <ostream>
-#include <print>
-#define OPENCV_DISABLE_EIGEN_TENSOR_SUPPORT
-#define IMGUI_DEFINE_MATH_OPERATORS
+// Copyright (c) FIRST and other WPILib contributors.
+// Open Source Software; you can modify and/or share it under the terms of
+// the WPILib BSD license file in the root directory of this project.
 
 #include <apriltag.h>
-#include <cscore.h>
-#include <cscore_cv.h>
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <tag36h11.h>
-
 #include <atomic>
-#include <iostream>
 #include <memory>
+#include <tag36h11.h>
 #include <thread>
 #include <utility>
 #include <vector>
 
-#include <Eigen/Core>
-#include <opencv2/calib3d.hpp>
+#include <imgui.h>
+#include <imgui_internal.h>
 #include <opencv2/core/core.hpp>
-#include <opencv2/core/eigen.hpp>
+#include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc.hpp>
 #include <wpi/mutex.h>
 #include <wpi/print.h>
 #include <wpi/spinlock.h>
 #include <wpigui.h>
 
+#include "cscore.h"
+#include "cscore_cv.h"
+
 namespace gui = wpi::gui;
 
 int main() {
-  // camera calibration TODO
-  constexpr double fx = 600;
-  constexpr double fy = 600;
-  constexpr double cx = 300;
-  constexpr double cy = 150;
-  Eigen::Matrix<double, 3, 3> A{
-      {fx, 0, cx},
-      {0, fy, cy},
-      {0, 0, 1},
-  };
-
-  float tagSize = 0.08255;
-  std::vector<cv::Point3d> tagPoints{
-      cv::Point3d{-tagSize, tagSize, 0},
-      cv::Point3d{tagSize, tagSize, 0},
-      cv::Point3d{tagSize, -tagSize, 0},
-      cv::Point3d{-tagSize, -tagSize, 0},
-  };
-
-  wpi::mutex latestFrameMutex;
-  std::unique_ptr<cv::Mat> latestFrame{nullptr};
+  wpi::spinlock latestFrameMutex;
+  std::unique_ptr<cv::Mat> latestFrame;
+  wpi::mutex freeListMutex;
   std::vector<std::unique_ptr<cv::Mat>> freeList;
-  wpi::spinlock freeListMutex;
   std::atomic<bool> stopCamera{false};
 
   cs::UsbCamera camera{"usbcam", 0};
-  camera.SetVideoMode(cs::VideoMode::kMJPEG, 640, 480, 60);
+  camera.SetVideoMode(cs::VideoMode::kMJPEG, 640, 480, 30);
   cs::CvSink cvsink{"cvsink"};
   cvsink.SetSource(camera);
 
@@ -84,12 +58,14 @@ int main() {
 
       // get or create a mat
       std::unique_ptr<cv::Mat> out;
-      if (!freeList.empty()) {
-        std::scoped_lock lock(freeListMutex);
-        out = std::move(freeList.back());
-        freeList.pop_back();
-      } else {
-        out = std::make_unique<cv::Mat>(cv::Mat());
+      {
+        std::scoped_lock lock{freeListMutex};
+        if (!freeList.empty()) {
+          out = std::move(freeList.back());
+          freeList.pop_back();
+        } else {
+          out = std::make_unique<cv::Mat>();
+        }
       }
 
       // convert to RGBA
@@ -97,25 +73,30 @@ int main() {
 
       {
         // make available
-        std::scoped_lock lock(latestFrameMutex);
+        std::scoped_lock lock{latestFrameMutex};
         latestFrame.swap(out);
       }
 
       // put the previous frame on free list
       if (out) {
-        std::scoped_lock lock(freeListMutex);
+        std::scoped_lock lock{freeListMutex};
         freeList.emplace_back(std::move(out));
       }
     }
   });
 
   gui::CreateContext();
-  gui::Initialize("Photon Lite", 1024, 768);
+  gui::Initialize("Hello World", 1024, 768);
   gui::Texture tex;
   gui::AddEarlyExecute([&] {
     cv::Mat gray;
-    if (latestFrame) {
-      cv::cvtColor(*latestFrame, gray, cv::COLOR_BGR2GRAY);
+    std::unique_ptr<cv::Mat> frame;
+    {
+      std::scoped_lock lock{latestFrameMutex};
+      latestFrame.swap(frame);
+    }
+    if (frame) {
+      cv::cvtColor(*frame, gray, cv::COLOR_BGR2GRAY);
 
       image_u8_t im = {gray.cols, gray.rows, gray.cols, gray.data};
       zarray_t *detections = apriltag_detector_detect(detector, &im);
@@ -129,16 +110,16 @@ int main() {
         points.emplace_back(cv::Point2d{det->p[1][0], det->p[1][1]});
         points.emplace_back(cv::Point2d{det->p[3][0], det->p[3][1]});
         points.emplace_back(cv::Point2d{det->p[2][0], det->p[2][1]});
-        cv::line(*latestFrame, cv::Point(det->p[0][0], det->p[0][1]),
+        cv::line(*frame, cv::Point(det->p[0][0], det->p[0][1]),
                  cv::Point(det->p[1][0], det->p[1][1]), cv::Scalar(0, 0xff, 0),
                  2);
-        cv::line(*latestFrame, cv::Point(det->p[0][0], det->p[0][1]),
+        cv::line(*frame, cv::Point(det->p[0][0], det->p[0][1]),
                  cv::Point(det->p[3][0], det->p[3][1]), cv::Scalar(0, 0, 0xff),
                  2);
-        cv::line(*latestFrame, cv::Point(det->p[1][0], det->p[1][1]),
+        cv::line(*frame, cv::Point(det->p[1][0], det->p[1][1]),
                  cv::Point(det->p[2][0], det->p[2][1]), cv::Scalar(0xff, 0, 0),
                  2);
-        cv::line(*latestFrame, cv::Point(det->p[2][0], det->p[2][1]),
+        cv::line(*frame, cv::Point(det->p[2][0], det->p[2][1]),
                  cv::Point(det->p[3][0], det->p[3][1]), cv::Scalar(0xff, 0, 0),
                  2);
 
@@ -150,39 +131,25 @@ int main() {
         int baseline;
         cv::Size textsize =
             cv::getTextSize(text, fontface, fontscale, 2, &baseline);
-        cv::putText(*latestFrame, text,
+        cv::putText(*frame, text,
                     cv::Point(det->c[0] - textsize.width / 2.0,
                               det->c[1] + textsize.height / 2.0),
                     fontface, fontscale, cv::Scalar(0xff, 0x99, 0), 2);
       }
 
-      if (points.size() >= 4) {
-        std::vector<double> rvec;
-        std::vector<double> tvec;
-        std::vector<double> distCoeffs{
-            0.02860487071331241,   0.009126602251891335, 0.0019540088117773633,
-            -0.003596010527440653, -0.13863285564042926, -0.0016559347518291224,
-            -4.017061418060786,    0.005592461908791266};
-        cv::Mat calibration{3, 3, CV_64F};
-        cv::eigen2cv(A, calibration);
-        cv::solvePnP(tagPoints, points, calibration, distCoeffs, rvec, tvec);
-        for (auto val : rvec) {
-          std::println("{}", val);
-        }
-        for (auto val : tvec) {
-          std::println("{}", val);
-        }
-      }
-
       apriltag_detections_destroy(detections);
 
       // create or update texture
-      if (!tex || latestFrame->cols != tex.GetWidth() ||
-          latestFrame->rows != tex.GetHeight()) {
-        tex = gui::Texture(gui::kPixelRGBA, latestFrame->cols,
-                           latestFrame->rows, latestFrame->data);
+      if (!tex || frame->cols != tex.GetWidth() ||
+          frame->rows != tex.GetHeight()) {
+        tex = gui::Texture(gui::kPixelRGBA, frame->cols, frame->rows,
+                           frame->data);
       } else {
-        tex.Update(latestFrame->data);
+        tex.Update(frame->data);
+      }
+      {
+        std::scoped_lock lock{freeListMutex};
+        freeList.emplace_back(std::move(frame));
       }
     }
 
@@ -200,8 +167,8 @@ int main() {
     }
     ImGui::End();
   });
-
   gui::Main();
+
 
   apriltag_detector_destroy(detector);
   tag36h11_destroy(family);

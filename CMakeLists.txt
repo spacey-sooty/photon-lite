@@ -29,8 +29,7 @@ set(WITH_PROTOBUF OFF)
 fetchcontent_declare(
     wpilib
     GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
-    # master on 15/3/25
-    GIT_TAG 1efaaefd78a634599b522fc2420c7283722554fb
+    GIT_TAG 02de5f710e2579f2079a28944e90b48b34d91cac
 )
 fetchcontent_makeavailable(wpilib)
 
